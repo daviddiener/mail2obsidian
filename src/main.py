@@ -1,0 +1,155 @@
+import imaplib
+import email
+from email.header import decode_header
+import os
+import logging
+import subprocess
+from datetime import datetime
+from dotenv import load_dotenv
+from markdownify import markdownify as md
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def clean(text):
+    # clean text for creating a folder
+    return "".join(c if c.isalnum() else "_" for c in text)
+
+def get_body(msg):
+    body = ""
+    html_body = ""
+    
+    if msg.is_multipart():
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            content_disposition = str(part.get("Content-Disposition"))
+            
+            if content_type == "text/plain" and "attachment" not in content_disposition:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    body = payload.decode(errors='replace')
+                    return body # Return plain text immediately if found
+            
+            elif content_type == "text/html" and "attachment" not in content_disposition:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    html_body = payload.decode(errors='replace')
+        
+        # If no plain text was found but HTML was, convert it
+        if html_body:
+            return md(html_body)
+    else:
+        content_type = msg.get_content_type()
+        payload = msg.get_payload(decode=True)
+        if payload:
+            if content_type == "text/html":
+                return md(payload.decode(errors='replace'))
+            else:
+                return payload.decode(errors='replace')
+    
+    return body
+
+def process_emails():
+    load_dotenv()
+    
+    username = os.getenv("GMAIL_EMAIL")
+    password = os.getenv("GMAIL_APP_PASSWORD")
+    imap_server = os.getenv("IMAP_SERVER", "imap.gmail.com")
+    label = os.getenv("GMAIL_LABEL", "Obsidian-Inbox")
+    output_dir = os.getenv("OUTPUT_DIR", "./inbox")
+
+    if not username or not password:
+        logger.error("GMAIL_EMAIL or GMAIL_APP_PASSWORD not set in .env")
+        return
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    try:
+        # create an IMAP4 class with SSL 
+        imap = imaplib.IMAP4_SSL(imap_server)
+        # authenticate
+        imap.login(username, password)
+        
+        status, messages = imap.select(label)
+        if status != "OK":
+            logger.error(f"Could not select label {label}")
+            return
+
+        # search for all unseen emails
+        status, response = imap.search(None, "UNSEEN")
+        if status != "OK":
+            logger.error("Error searching for emails")
+            return
+
+        email_ids = response[0].split()
+        logger.info(f"Found {len(email_ids)} new emails")
+
+        for e_id in email_ids:
+            # fetch the email message by ID
+            res, msg_data = imap.fetch(e_id, "(RFC822)")
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    # parse a bytes email into a message object
+                    msg = email.message_from_bytes(response_part[1])
+                    # decode the email subject
+                    subject, encoding = decode_header(msg["Subject"])[0]
+                    if isinstance(subject, bytes):
+                        # if it's bytes, decode to str
+                        subject = subject.decode(encoding or "utf-8")
+                    
+                    # decode email sender
+                    from_, encoding = decode_header(msg.get("From"))[0]
+                    if isinstance(from_, bytes):
+                        from_ = from_.decode(encoding or "utf-8")
+                    
+                    logger.info(f"Processing email: {subject} from {from_}")
+                    
+                    body = get_body(msg)
+                    
+                    # Create filename from subject
+                    filename = clean(subject) + ".md"
+                    filepath = os.path.join(output_dir, filename)
+                    
+                    # If file exists, append a timestamp to avoid overwrite? 
+                    # Or just overwrite? Obsidian usually handles duplicates or we can use unique names.
+                    if os.path.exists(filepath):
+                        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                        filename = f"{clean(subject)}_{timestamp}.md"
+                        filepath = os.path.join(output_dir, filename)
+
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        f.write(body)
+                    
+                    logger.info(f"Saved to {filepath}")
+                    
+                    # Mark as read (implicitly done by fetch in some servers, but let's be explicit)
+                    imap.store(e_id, '+FLAGS', r'\Seen')
+
+        # close the connection and logout
+        imap.close()
+        imap.logout()
+
+        # Rclone sync if configured
+        rclone_remote = os.getenv("RCLONE_REMOTE_PATH")
+        if rclone_remote and os.listdir(output_dir):
+            logger.info(f"Syncing {output_dir} to {rclone_remote} via rclone")
+            try:
+                # rclone move might be better if we want to clear the local inbox
+                # but rclone copy is safer. Let's use move to keep local clean after sync.
+                subprocess.run(["rclone", "move", output_dir, rclone_remote], check=True)
+                logger.info("Rclone sync completed successfully")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Rclone failed with error: {e}")
+            except FileNotFoundError:
+                logger.error("rclone command not found. Please install it.")
+
+    except Exception as e:
+        logger.exception(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    process_emails()

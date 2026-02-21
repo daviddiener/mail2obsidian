@@ -1,0 +1,13 @@
+[Unit]
+Description=Mail to Obsidian Parser
+After=network.target
+
+[Service]
+Type=oneshot
+User=%u
+WorkingDirectory=/home/%u/Workspace/mail2obsidian
+ExecStart=/usr/bin/python3 /home/%u/Workspace/mail2obsidian/src/main.py
+EnvironmentFile=/home/%u/Workspace/mail2obsidian/.env
+
+[Install]
+WantedBy=multi-user.target
