@@ -1,6 +1,9 @@
 import imaplib
 import email
+import re
 from email.header import decode_header
+from email.utils import parsedate_to_datetime, parseaddr
+from urllib.parse import quote
 import os
 import logging
 import subprocess
@@ -16,8 +19,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def clean(text):
-    # clean text for creating a folder
-    return "".join(c if c.isalnum() else "_" for c in text)
+    # Replace only characters that are definitely illegal in filenames
+    illegal = r'[<>:"/\\|?*]'
+    cleaned = re.sub(illegal, "_", text)
+    return cleaned.strip()
 
 def get_body(msg):
     body = ""
@@ -110,6 +115,34 @@ def process_emails():
                     logger.info(f"Processing email: {subject} from {from_}")
                     
                     body = get_body(msg)
+
+                    # Extract metadata for YAML
+                    from_header = msg.get("From")
+                    _, from_email = parseaddr(from_header)
+                    
+                    date_header = msg.get("Date")
+                    try:
+                        dt = parsedate_to_datetime(date_header)
+                        formatted_date = dt.strftime("%d.%m.%Y, %H:%M")
+                    except Exception:
+                        formatted_date = date_header
+
+                    msg_id = msg.get("Message-ID")
+                    source_url = f"https://mail.google.com/mail/u/0/#search/rfc822msgid%3A{quote(msg_id)}" if msg_id else "Gmail"
+                    
+                    # Escape double quotes in subject for YAML
+                    yaml_title = subject.replace('"', '\\"')
+                    
+                    yaml_frontmatter = f"""---
+title: "{yaml_title}"
+source: "Gmail"
+source_url: "{source_url}"
+from_email: "{from_email}"
+date: "{formatted_date}"
+---
+
+"""
+                    full_content = yaml_frontmatter + body
                     
                     # Create filename from subject
                     filename = clean(subject) + ".md"
@@ -123,7 +156,7 @@ def process_emails():
                         filepath = os.path.join(output_dir, filename)
 
                     with open(filepath, "w", encoding="utf-8") as f:
-                        f.write(body)
+                        f.write(full_content)
                     
                     logger.info(f"Saved to {filepath}")
                     
