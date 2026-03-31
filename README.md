@@ -16,37 +16,32 @@ A simple pipeline to send emails to your Obsidian vault.
 ## Setup
 
 1.  Clone this repository.
-2.  Install dependencies:
+2.  Optional: Conda ENV: conda create --name=mail2obsidian python
+3.  Install dependencies:
     ```bash
     pip install -r requirements.txt
     ```
-3.  Copy `.env.example` to `.env` and fill in your details:
+4.  Copy `.env.example` to `.env` and fill in your details:
     ```bash
     cp .env.example .env
     ```
-4.  Run the script:
+5.  Run the script:
     ```bash
     python src/main.py
     ```
 
-## Automation
+## Systemd
 
-You can set up a cron job to run this every 5 minutes:
-
-```cron
-*/5 * * * * cd /path/to/mail2obsidian && /usr/bin/python3 src/main.py >> /var/log/mail2obsidian.log 2>&1
-```
-
-### Systemd (Alternative)
-
-1.  Copy the service and timer files to `~/.config/systemd/user/`:
+1.  Edit `mail2obsidian.service` to set the correct `WorkingDirectory` and `ExecStart` paths.
+2.  Copy the service and timer files to `~/.config/systemd/user/`:
     ```bash
     mkdir -p ~/.config/systemd/user/
     cp mail2obsidian.service mail2obsidian.timer ~/.config/systemd/user/
     ```
-2.  Edit `mail2obsidian.service` to set the correct `WorkingDirectory` and `ExecStart` paths.
+
 3.  Reload systemd and enable the timer:
     ```bash
     systemctl --user daemon-reload
     systemctl --user enable --now mail2obsidian.timer
     ```
+4. Look at the logs after 10 minutes: journalctl --user -f -u mail2obsidian.service
