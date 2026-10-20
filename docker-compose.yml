@@ -8,7 +8,7 @@ services:
     environment:
       - TZ=${TZ:-Europe/Berlin}
     volumes:
-      # Mount host rclone configuration (read-only)
-      - ${RCLONE_CONFIG_PATH:-~/.config/rclone/rclone.conf}:/root/.config/rclone/rclone.conf:ro
+      # Mount host rclone configuration directory (read-write so OAuth tokens can refresh)
+      - ${RCLONE_CONFIG_DIR:-~/.config/rclone}:/root/.config/rclone
       # Staging / local output directory
       - ./inbox:/app/inbox

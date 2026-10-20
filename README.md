@@ -53,8 +53,8 @@ CHECK_INTERVAL=600
 # Rclone remote target directory
 RCLONE_REMOTE_PATH=gdrive:Dokumente/Obsidian/yourvault/00_Inbox
 
-# Path to host rclone.conf (mounted into the container)
-RCLONE_CONFIG_PATH=~/.config/rclone/rclone.conf
+# Path to host rclone config directory (mounted into the container)
+RCLONE_CONFIG_DIR=~/.config/rclone
 
 # Timezone
 TZ=Europe/Berlin
