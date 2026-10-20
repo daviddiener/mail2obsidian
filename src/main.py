@@ -7,6 +7,10 @@ from urllib.parse import quote
 import os
 import logging
 import subprocess
+import signal
+import sys
+import time
+import argparse
 from datetime import datetime
 from dotenv import load_dotenv
 from markdownify import markdownify as md
@@ -17,6 +21,14 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+stop_requested = False
+
+def handle_signal(sig, frame):
+    global stop_requested
+    logger.info(f"Received signal {sig}, initiating graceful shutdown...")
+    stop_requested = True
+
 
 def clean(text):
     # Replace only characters that are definitely illegal in filenames
@@ -184,5 +196,43 @@ date: "{formatted_date}"
     except Exception as e:
         logger.exception(f"An error occurred: {e}")
 
+def main():
+    parser = argparse.ArgumentParser(description="Mail to Obsidian Parser")
+    parser.add_argument("--once", action="store_true", help="Run once and exit instead of continuous loop")
+    parser.add_argument("--interval", type=int, default=None, help="Polling interval in seconds (overrides CHECK_INTERVAL)")
+    args = parser.parse_args()
+
+    load_dotenv()
+
+    run_once = args.once or os.getenv("RUN_ONCE", "false").lower() in ("true", "1", "yes")
+    
+    interval = args.interval
+    if interval is None:
+        try:
+            interval = int(os.getenv("CHECK_INTERVAL", "600"))
+        except ValueError:
+            interval = 600
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
+    if run_once:
+        logger.info("Executing mail2obsidian in one-shot mode...")
+        process_emails()
+        return
+
+    logger.info(f"Starting mail2obsidian daemon (polling every {interval}s)...")
+    while not stop_requested:
+        process_emails()
+        
+        # Sleep in 1-second intervals to promptly respond to termination signals
+        for _ in range(interval):
+            if stop_requested:
+                break
+            time.sleep(1)
+
+    logger.info("mail2obsidian daemon stopped gracefully.")
+
 if __name__ == "__main__":
-    process_emails()
+    main()
+
